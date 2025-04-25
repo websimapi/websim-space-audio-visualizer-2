@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Space Audio Visualizer</title>
+    <title>4D Fractal Audio Visualizer</title>
     <style>
         body {
             margin: 0;
@@ -84,12 +84,14 @@
         document.body.appendChild(renderer.domElement);
 
         // Camera position
-        camera.position.z = 30;
+        camera.position.z = 50;
 
         // Controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.5;
 
         // Create a starfield
         const starCount = 5000;
@@ -118,31 +120,272 @@
         const stars = new THREE.Points(starGeometry, starMaterial);
         scene.add(stars);
         
+        // Render targets for post-processing effects
+        const renderScene = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight);
+        
         // Audio layers for visualization
         const layers = [
-            { name: "bass", range: [20, 250], object: null, color: 0xff0000 },
-            { name: "midrange", range: [250, 2000], object: null, color: 0x00ff00 },
-            { name: "treble", range: [2000, 20000], object: null, color: 0x0000ff },
-            { name: "percussion", range: [5000, 20000], object: null, color: 0xffff00 }
+            { name: "bass", range: [20, 250], object: null, color: 0xff0000, type: "menger" },
+            { name: "midrange", range: [250, 2000], object: null, color: 0x00ff00, type: "julia" },
+            { name: "treble", range: [2000, 20000], object: null, color: 0x0000ff, type: "tesseract" },
+            { name: "percussion", range: [5000, 20000], object: null, color: 0xffff00, type: "sierpinski" }
         ];
 
-        // Create visualization objects for each layer
-        layers.forEach((layer, index) => {
-            // Create a sphere for each audio layer
-            const geometry = new THREE.IcosahedronGeometry(5, 1);
-            const material = new THREE.MeshPhongMaterial({
-                color: layer.color,
-                emissive: layer.color,
+        // Function to create Menger Sponge-like fractal (Bass)
+        function createMengerSponge(level = 2) {
+            const group = new THREE.Group();
+            
+            // Start with a cube
+            let size = 10;
+            const cubeGeo = new THREE.BoxGeometry(size, size, size);
+            const cubeMat = new THREE.MeshPhongMaterial({
+                color: layers[0].color,
+                emissive: layers[0].color,
                 emissiveIntensity: 0.5,
                 wireframe: true,
                 transparent: true,
                 opacity: 0.7
             });
             
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.position.x = (index - 1.5) * 12; // Space out the layers
-            scene.add(mesh);
-            layer.object = mesh;
+            const baseCube = new THREE.Mesh(cubeGeo, cubeMat);
+            group.add(baseCube);
+            
+            // Add smaller cubes recursively
+            for (let i = 1; i <= level; i++) {
+                const newSize = size / 3;
+                const positions = [];
+                
+                // Define positions for subcubes (simplified Menger pattern)
+                for (let x = -1; x <= 1; x++) {
+                    for (let y = -1; y <= 1; y++) {
+                        for (let z = -1; z <= 1; z++) {
+                            // Skip center and faces centers of the cube
+                            if (Math.abs(x) + Math.abs(y) + Math.abs(z) > 1) {
+                                positions.push(new THREE.Vector3(x * size/2, y * size/2, z * size/2));
+                            }
+                        }
+                    }
+                }
+                
+                // Create smaller cubes
+                const smallCubeGeo = new THREE.BoxGeometry(newSize, newSize, newSize);
+                
+                positions.forEach(pos => {
+                    const smallCube = new THREE.Mesh(smallCubeGeo, cubeMat.clone());
+                    smallCube.position.copy(pos);
+                    group.add(smallCube);
+                });
+                
+                size = newSize;
+            }
+            
+            return group;
+        }
+
+        // Function to create 3D Julia Set-like fractal (Midrange)
+        function createJuliaSet() {
+            const group = new THREE.Group();
+            const particleCount = 10000;
+            const particleGeometry = new THREE.BufferGeometry();
+            const particlePositions = new Float32Array(particleCount * 3);
+            
+            // Generate "Julia set like" points
+            for (let i = 0; i < particleCount; i++) {
+                const t = Math.random() * Math.PI * 2;
+                const s = Math.random() * Math.PI;
+                const r = 8 + Math.sin(t * 7) * Math.cos(s * 8) * 2;
+                
+                particlePositions[i * 3] = Math.cos(t) * Math.sin(s) * r;
+                particlePositions[i * 3 + 1] = Math.sin(t) * Math.sin(s) * r;
+                particlePositions[i * 3 + 2] = Math.cos(s) * r;
+            }
+            
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+            
+            const particleMaterial = new THREE.PointsMaterial({
+                color: layers[1].color,
+                size: 0.2,
+                emissive: layers[1].color,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            const particles = new THREE.Points(particleGeometry, particleMaterial);
+            group.add(particles);
+            
+            // Add orbital rings
+            for (let i = 0; i < 5; i++) {
+                const ringGeometry = new THREE.TorusGeometry(10 + i * 2, 0.2, 16, 100);
+                const ringMaterial = new THREE.MeshPhongMaterial({
+                    color: layers[1].color,
+                    emissive: layers[1].color,
+                    emissiveIntensity: 0.5,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                
+                const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+                ring.rotation.x = Math.random() * Math.PI;
+                ring.rotation.y = Math.random() * Math.PI;
+                group.add(ring);
+            }
+            
+            return group;
+        }
+
+        // Function to create 4D Tesseract projection (Treble)
+        function createTesseract() {
+            const group = new THREE.Group();
+            
+            // Create nested cubes to represent tesseract
+            const cubeGeo1 = new THREE.BoxGeometry(10, 10, 10);
+            const cubeGeo2 = new THREE.BoxGeometry(15, 15, 15);
+            
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: layers[2].color,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            const cube1Edges = new THREE.LineSegments(
+                new THREE.EdgesGeometry(cubeGeo1),
+                lineMaterial
+            );
+            
+            const cube2Edges = new THREE.LineSegments(
+                new THREE.EdgesGeometry(cubeGeo2),
+                lineMaterial
+            );
+            
+            group.add(cube1Edges);
+            group.add(cube2Edges);
+            
+            // Connect vertices between the cubes
+            const vertices1 = cubeGeo1.attributes.position;
+            const vertices2 = cubeGeo2.attributes.position;
+            
+            for (let i = 0; i < 8; i++) {
+                const i3 = i * 3;
+                const v1 = new THREE.Vector3(
+                    vertices1.array[i3],
+                    vertices1.array[i3 + 1],
+                    vertices1.array[i3 + 2]
+                );
+                
+                const v2 = new THREE.Vector3(
+                    vertices2.array[i3],
+                    vertices2.array[i3 + 1],
+                    vertices2.array[i3 + 2]
+                );
+                
+                const connectorGeo = new THREE.BufferGeometry().setFromPoints([v1, v2]);
+                const connector = new THREE.Line(connectorGeo, lineMaterial);
+                group.add(connector);
+            }
+            
+            // Add an inner spherical component
+            const sphereGeo = new THREE.SphereGeometry(5, 16, 16);
+            const sphereMaterial = new THREE.MeshPhongMaterial({
+                color: layers[2].color,
+                emissive: layers[2].color,
+                emissiveIntensity: 0.5,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.4
+            });
+            
+            const sphere = new THREE.Mesh(sphereGeo, sphereMaterial);
+            group.add(sphere);
+            
+            return group;
+        }
+
+        // Function to create Sierpinski Tetrahedron (Percussion)
+        function createSierpinskiTetrahedron(level = 3) {
+            const group = new THREE.Group();
+            
+            // Function to create a tetrahedron
+            function createTetrahedron(size, x, y, z) {
+                const geo = new THREE.TetrahedronGeometry(size);
+                const mat = new THREE.MeshPhongMaterial({
+                    color: layers[3].color,
+                    emissive: layers[3].color,
+                    emissiveIntensity: 0.5,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.7
+                });
+                
+                const tetra = new THREE.Mesh(geo, mat);
+                tetra.position.set(x, y, z);
+                return tetra;
+            }
+            
+            // Function to recursively create sierpinski pattern
+            function createSierpinski(level, size, x, y, z) {
+                if (level === 0) {
+                    const tetra = createTetrahedron(size, x, y, z);
+                    group.add(tetra);
+                    return;
+                }
+                
+                const newSize = size / 2;
+                
+                // Bottom
+                createSierpinski(level - 1, newSize, x, y - newSize, z);
+                
+                // Front
+                createSierpinski(level - 1, newSize, x, y + newSize, z - newSize);
+                
+                // Left
+                createSierpinski(level - 1, newSize, x - newSize, y + newSize, z + newSize);
+                
+                // Right
+                createSierpinski(level - 1, newSize, x + newSize, y + newSize, z + newSize);
+            }
+            
+            createSierpinski(level, 10, 0, 0, 0);
+            return group;
+        }
+
+        // Create visualization objects for each layer
+        layers.forEach((layer, index) => {
+            let object;
+            
+            switch(layer.type) {
+                case "menger":
+                    object = createMengerSponge();
+                    break;
+                case "julia":
+                    object = createJuliaSet();
+                    break;
+                case "tesseract":
+                    object = createTesseract();
+                    break;
+                case "sierpinski":
+                    object = createSierpinskiTetrahedron();
+                    break;
+            }
+            
+            // Position the fractal objects in a spherical arrangement
+            const angle = (index / layers.length) * Math.PI * 2;
+            const radius = 30;
+            object.position.x = Math.cos(angle) * radius;
+            object.position.z = Math.sin(angle) * radius;
+            
+            scene.add(object);
+            layer.object = object;
+            
+            // Add custom properties for animation
+            layer.time = 0;
+            layer.baseScale = 1;
+            layer.rotationSpeed = {
+                x: 0.005 + Math.random() * 0.01,
+                y: 0.005 + Math.random() * 0.01,
+                z: 0.005 + Math.random() * 0.01,
+                w: 0.005 + Math.random() * 0.01 // 4D rotation analog
+            };
         });
 
         // Add lights
@@ -152,6 +395,19 @@
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(1, 1, 1);
         scene.add(directionalLight);
+        
+        // Add a few point lights for dynamic lighting
+        const colors = [0xff0055, 0x00ff88, 0x0088ff, 0xffff00];
+        colors.forEach((color, i) => {
+            const light = new THREE.PointLight(color, 1, 50);
+            const angle = (i / colors.length) * Math.PI * 2;
+            light.position.set(
+                Math.cos(angle) * 20, 
+                Math.sin(angle) * 10, 
+                Math.sin(angle) * 20
+            );
+            scene.add(light);
+        });
         
         // Audio context and analyzer
         let audioContext;
@@ -219,21 +475,147 @@
                 }
                 
                 const average = count > 0 ? sum / count / 255 : 0;
+                layer.time += 0.01 + average * 0.05;
                 
                 // Update the layer's visualization
                 if (layer.object) {
-                    // Scale based on audio intensity
-                    const scale = 1 + average * 2;
-                    layer.object.scale.set(scale, scale, scale);
+                    // Base scale with audio reactivity
+                    const scale = layer.baseScale + average * 1.5;
                     
-                    // Rotate based on audio intensity
-                    layer.object.rotation.x += average * 0.05;
-                    layer.object.rotation.y += average * 0.03;
+                    // 4D-like transformations
+                    switch(layer.type) {
+                        case "menger":
+                            // Menger Sponge - pulsating and rotating
+                            layer.object.scale.set(scale, scale, scale);
+                            layer.object.rotation.x += layer.rotationSpeed.x * (1 + average * 2);
+                            layer.object.rotation.y += layer.rotationSpeed.y * (1 + average * 2);
+                            layer.object.rotation.z += layer.rotationSpeed.z * (1 + average);
+                            
+                            // Apply morphing to the children based on audio
+                            layer.object.children.forEach((child, i) => {
+                                if (i > 0) { // Skip the main cube
+                                    child.position.x += Math.sin(layer.time + i) * average * 0.1;
+                                    child.position.y += Math.cos(layer.time + i) * average * 0.1;
+                                    child.position.z += Math.sin(layer.time * 1.5 + i) * average * 0.1;
+                                }
+                                
+                                if (child.material) {
+                                    child.material.emissiveIntensity = 0.5 + average * 2;
+                                    child.material.opacity = 0.4 + average * 0.6;
+                                }
+                            });
+                            break;
+                            
+                        case "julia":
+                            // Julia Set - spiraling and transforming
+                            layer.object.scale.set(scale, scale, scale);
+                            layer.object.rotation.x += layer.rotationSpeed.x;
+                            layer.object.rotation.y += layer.rotationSpeed.y;
+                            
+                            // Apply wave-like distortion
+                            if (layer.object.children[0] && layer.object.children[0].geometry) {
+                                const positions = layer.object.children[0].geometry.attributes.position.array;
+                                for (let i = 0; i < positions.length; i += 3) {
+                                    const x = positions[i];
+                                    const y = positions[i + 1];
+                                    const z = positions[i + 2];
+                                    const dist = Math.sqrt(x*x + y*y + z*z);
+                                    
+                                    positions[i] += Math.sin(dist * 0.2 + layer.time) * average * 0.3;
+                                    positions[i + 1] += Math.cos(dist * 0.2 + layer.time) * average * 0.3;
+                                    positions[i + 2] += Math.sin(dist * 0.2 + layer.time * 1.5) * average * 0.3;
+                                }
+                                layer.object.children[0].geometry.attributes.position.needsUpdate = true;
+                            }
+                            
+                            // Animate the rings
+                            for (let i = 1; i < layer.object.children.length; i++) {
+                                const ring = layer.object.children[i];
+                                ring.rotation.x += 0.01 + average * 0.03;
+                                ring.rotation.y += 0.01 + average * 0.02;
+                                ring.rotation.z += 0.01 + average * 0.01;
+                                
+                                if (ring.material) {
+                                    ring.material.emissiveIntensity = 0.5 + average * 2;
+                                    ring.material.opacity = 0.3 + average * 0.7;
+                                }
+                            }
+                            break;
+                            
+                        case "tesseract":
+                            // Tesseract - 4D rotation simulation
+                            layer.object.scale.set(scale, scale, scale);
+                            
+                            // Apply 4D-like rotations
+                            layer.object.rotation.x += layer.rotationSpeed.x;
+                            layer.object.rotation.y += layer.rotationSpeed.y;
+                            layer.object.rotation.z += layer.rotationSpeed.z;
+                            
+                            // Simulate 4D rotation by scaling the inner and outer cubes
+                            const innerScale = 0.6 + Math.sin(layer.time) * 0.2 + average * 0.3;
+                            const outerScale = 1.0 + Math.cos(layer.time) * 0.2 + average * 0.3;
+                            
+                            layer.object.children[0].scale.set(innerScale, innerScale, innerScale);
+                            layer.object.children[1].scale.set(outerScale, outerScale, outerScale);
+                            
+                            // Pulsate connectors
+                            for (let i = 2; i < layer.object.children.length - 1; i++) {
+                                if (layer.object.children[i].material) {
+                                    layer.object.children[i].material.opacity = 0.3 + Math.sin(layer.time + i) * 0.3 + average * 0.4;
+                                }
+                            }
+                            
+                            // Animate the central sphere
+                            if (layer.object.children[layer.object.children.length - 1].material) {
+                                const sphere = layer.object.children[layer.object.children.length - 1];
+                                sphere.scale.set(1 + average * 2, 1 + average * 2, 1 + average * 2);
+                                sphere.material.emissiveIntensity = 0.5 + average * 2;
+                                sphere.material.opacity = 0.2 + average * 0.8;
+                            }
+                            break;
+                            
+                        case "sierpinski":
+                            // Sierpinski Tetrahedron - fractal distortion
+                            layer.object.scale.set(scale, scale, scale);
+                            layer.object.rotation.x += layer.rotationSpeed.x;
+                            layer.object.rotation.y += layer.rotationSpeed.y;
+                            layer.object.rotation.z += layer.rotationSpeed.z;
+                            
+                            // Animate individual tetrahedrons
+                            layer.object.children.forEach((tetra, i) => {
+                                const pulseFactor = Math.sin(layer.time * 2 + i * 0.1) * 0.1 + average * 0.2;
+                                tetra.scale.set(1 + pulseFactor, 1 + pulseFactor, 1 + pulseFactor);
+                                
+                                // Apply subtle position changes
+                                tetra.position.x += Math.sin(layer.time + i) * average * 0.05;
+                                tetra.position.y += Math.cos(layer.time + i) * average * 0.05;
+                                tetra.position.z += Math.sin(layer.time * 1.5 + i) * average * 0.05;
+                                
+                                if (tetra.material) {
+                                    tetra.material.emissiveIntensity = 0.5 + average * 2;
+                                    tetra.material.opacity = 0.4 + average * 0.6;
+                                }
+                            });
+                            break;
+                    }
                     
-                    // Update material properties
-                    if (layer.object.material) {
-                        layer.object.material.emissiveIntensity = 0.5 + average * 1.5;
-                        layer.object.material.opacity = 0.5 + average * 0.5;
+                    // Full screen effect - bring fractal closer to camera when audio is intense
+                    if (average > 0.6) {
+                        const cameraDirection = new THREE.Vector3();
+                        camera.getWorldDirection(cameraDirection);
+                        
+                        // Move toward camera slightly
+                        layer.object.position.x += cameraDirection.x * average * 0.5;
+                        layer.object.position.y += cameraDirection.y * average * 0.5;
+                        layer.object.position.z += cameraDirection.z * average * 0.5;
+                        
+                        // Then ease back
+                        const idealX = Math.cos((index / layers.length) * Math.PI * 2) * 30;
+                        const idealZ = Math.sin((index / layers.length) * Math.PI * 2) * 30;
+                        
+                        layer.object.position.x += (idealX - layer.object.position.x) * 0.02;
+                        layer.object.position.y += (0 - layer.object.position.y) * 0.02;
+                        layer.object.position.z += (idealZ - layer.object.position.z) * 0.02;
                     }
                 }
             });
@@ -242,6 +624,23 @@
             const totalAverage = Array.from(dataArray).reduce((a, b) => a + b, 0) / bufferLength / 255;
             stars.rotation.y += 0.0002 + totalAverage * 0.001;
             stars.rotation.x += 0.0001 + totalAverage * 0.0005;
+            
+            // Adjust camera based on audio intensity
+            if (totalAverage > 0.5) {
+                camera.fov = 75 + totalAverage * 10;
+                camera.updateProjectionMatrix();
+                
+                // Camera shake effect for intense audio
+                if (totalAverage > 0.7) {
+                    camera.position.x += (Math.random() - 0.5) * totalAverage * 0.2;
+                    camera.position.y += (Math.random() - 0.5) * totalAverage * 0.2;
+                    camera.position.z += (Math.random() - 0.5) * totalAverage * 0.2;
+                }
+            } else {
+                // Return to default FOV
+                camera.fov += (75 - camera.fov) * 0.05;
+                camera.updateProjectionMatrix();
+            }
         }
         
         // Animation loop
@@ -263,9 +662,9 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderScene.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-

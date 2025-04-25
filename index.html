@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Audio Visualizer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(100, 149, 237, 0.5);
+            border: 1px solid rgba(100, 149, 237, 0.3);
+        }
+        
+        button {
+            background-color: #1a3a6e;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            background-color: #2e5cb8;
+            box-shadow: 0 0 15px rgba(100, 149, 237, 0.8);
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        #statusMessage {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #6495ED;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="startButton">Select Tab To Record Audio</button>
+        <div id="statusMessage" class="hidden">Recording audio from selected tab...</div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Camera position
+        camera.position.z = 30;
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // Create a starfield
+        const starCount = 5000;
+        const starGeometry = new THREE.BufferGeometry();
+        const starPositions = new Float32Array(starCount * 3);
+        const starSizes = new Float32Array(starCount);
+        
+        for (let i = 0; i < starCount; i++) {
+            const i3 = i * 3;
+            starPositions[i3] = (Math.random() - 0.5) * 2000;
+            starPositions[i3 + 1] = (Math.random() - 0.5) * 2000;
+            starPositions[i3 + 2] = (Math.random() - 0.5) * 2000;
+            starSizes[i] = Math.random() * 2;
+        }
+        
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        starGeometry.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+        
+        const starMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 1,
+            transparent: true,
+            sizeAttenuation: true
+        });
+        
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+        
+        // Audio layers for visualization
+        const layers = [
+            { name: "bass", range: [20, 250], object: null, color: 0xff0000 },
+            { name: "midrange", range: [250, 2000], object: null, color: 0x00ff00 },
+            { name: "treble", range: [2000, 20000], object: null, color: 0x0000ff },
+            { name: "percussion", range: [5000, 20000], object: null, color: 0xffff00 }
+        ];
+
+        // Create visualization objects for each layer
+        layers.forEach((layer, index) => {
+            // Create a sphere for each audio layer
+            const geometry = new THREE.IcosahedronGeometry(5, 1);
+            const material = new THREE.MeshPhongMaterial({
+                color: layer.color,
+                emissive: layer.color,
+                emissiveIntensity: 0.5,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.7
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.x = (index - 1.5) * 12; // Space out the layers
+            scene.add(mesh);
+            layer.object = mesh;
+        });
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0x222244);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        
+        // Audio context and analyzer
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let bufferLength;
+        
+        // Function to start audio recording and visualization
+        async function startCapture() {
+            try {
+                // Request access to the user's screen with audio
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true,
+                    audio: true
+                });
+                
+                // Hide video tracks - we only want audio
+                stream.getVideoTracks().forEach(track => {
+                    track.enabled = false;
+                });
+                
+                // Show recording status
+                document.getElementById('startButton').classList.add('hidden');
+                document.getElementById('statusMessage').classList.remove('hidden');
+                
+                // Set up audio context and analyzer
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                bufferLength = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufferLength);
+                source.connect(analyser);
+                
+                // Start the animation loop
+                animate();
+            } catch (error) {
+                console.error("Error capturing media: ", error);
+                alert("Failed to start capturing: " + error.message);
+            }
+        }
+
+        // Event listener for the start button
+        document.getElementById('startButton').addEventListener('click', startCapture);
+        
+        // Function to update visualizations based on audio
+        function updateVisualizations() {
+            if (!analyser) return;
+            
+            // Get frequency data
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Calculate average amplitudes for each layer
+            layers.forEach(layer => {
+                // Convert frequency ranges to indices in the frequency data array
+                const lowIndex = Math.floor(layer.range[0] / (audioContext.sampleRate / 2) * bufferLength);
+                const highIndex = Math.floor(layer.range[1] / (audioContext.sampleRate / 2) * bufferLength);
+                
+                let sum = 0;
+                let count = 0;
+                
+                for (let i = lowIndex; i < highIndex && i < bufferLength; i++) {
+                    sum += dataArray[i];
+                    count++;
+                }
+                
+                const average = count > 0 ? sum / count / 255 : 0;
+                
+                // Update the layer's visualization
+                if (layer.object) {
+                    // Scale based on audio intensity
+                    const scale = 1 + average * 2;
+                    layer.object.scale.set(scale, scale, scale);
+                    
+                    // Rotate based on audio intensity
+                    layer.object.rotation.x += average * 0.05;
+                    layer.object.rotation.y += average * 0.03;
+                    
+                    // Update material properties
+                    if (layer.object.material) {
+                        layer.object.material.emissiveIntensity = 0.5 + average * 1.5;
+                        layer.object.material.opacity = 0.5 + average * 0.5;
+                    }
+                }
+            });
+            
+            // Update stars based on overall audio intensity
+            const totalAverage = Array.from(dataArray).reduce((a, b) => a + b, 0) / bufferLength / 255;
+            stars.rotation.y += 0.0002 + totalAverage * 0.001;
+            stars.rotation.x += 0.0001 + totalAverage * 0.0005;
+        }
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update visualizations
+            updateVisualizations();
+            
+            // Update controls
+            controls.update();
+            
+            // Render
+            renderer.render(scene, camera);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
